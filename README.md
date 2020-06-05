@@ -5,12 +5,12 @@ The purpose of this manager is to handle messages and events accross uWSGI local
 
 Socketio sessions are dispatched on different processes, this manager store this information in uWSGI cache and route all events to the concerned worker.
 For any reasons if a worker was not registered for a given SID, to avoid losing event we forward it to all workers (fallback solution).
-To manage concurrency, events are stored in cache slots dedicated to each workers and they ayre incremented if a slot is not available.
+To manage concurrency, events are stored in cache slots dedicated to each workers and they are incremented if a slot is not available.
 
 Although the cache address can be a remote server, uWSGI signals are for internal use only and do not warn other potential uWSGI servers.  
 It would be possible to accomplish this if uWSGI signals could be sent to the target servers but this is not the case here.
 
-A simpler solution to distribute the messages would be to use the RPC system of uWSGI through the workers but this feature is not available, I made a request about it on the uWSGI repository.
+A simpler solution to distribute events would be to use the RPC system of uWSGI through the workers but this feature is not available, I made a request about it on the uWSGI repository.
 
 **Prerequisite**
 
