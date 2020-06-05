@@ -38,5 +38,5 @@ socketio = SocketIO(app, client_manager=UWSGIManager())
 UWSGIManager(channel='socketio', cache='', cache_timeout=default_cache_timeout, debug=False)
 ```
   * **cache**: cache name (empty string means uWSGI will use the first cache instance initialized)
-  * **cache_timeout**: mainly for sidecache, cached events are deleted when workers unstack them.
+  * **cache_timeout**: mainly for cahcing sids, cached events are deleted when workers unstack them.
   * **debug**: enabling debug mode
