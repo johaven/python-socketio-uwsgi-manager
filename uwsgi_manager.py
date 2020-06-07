@@ -55,7 +55,7 @@ class UWSGIManager(PubSubManager):
         self._init_configuration()
 
     def _init_configuration(self):
-        logger.setLevel(logging.DEBUG if self.debug else logger.WARNING)
+        logger.setLevel(logging.DEBUG if self.debug else logging.WARNING)
         if uwsgi is None:
             raise RuntimeError('You are not running under uWSGI')
         if 'cache2' not in uwsgi.opt:
