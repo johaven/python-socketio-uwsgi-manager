@@ -147,7 +147,7 @@ class UWSGIManager(PubSubManager):
             msg_key = self.cache_msg_key % (worker_id, msg_id)
             msg = uwsgi.cache_get(msg_key, self.cache)
             if msg is not None:
-                logger.debug('Get message from worker %s - %s' % (self.worker_id, msg_key))
+                logger.debug('Get and send message from worker %s - %s' % (self.worker_id, msg_key))
                 if worker_id:
                     # delete message if worker_id is different from 0, else `short_cache_timeout` will do the job
                     uwsgi.cache_del(msg_key, self.cache)
@@ -197,7 +197,6 @@ class UWSGIManager(PubSubManager):
 
     def _internal_emit(self, data):
         """ Process data like the `PubSubManager` in `_thread` method """
-        logger.debug('Emit from worker %s message %s' % (self.worker_id, data))
         if data and 'method' in data:
             if data['method'] == 'emit':
                 self._handle_emit(data)
