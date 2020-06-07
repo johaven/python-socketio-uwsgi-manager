@@ -38,18 +38,19 @@ class UWSGIManager(PubSubManager):
 
     """
     name = 'uwsgi'
+    cache = ''
     cache_worker_key = 'websocket_worker_%s'  # param: worker_id, return a list of sids
     cache_msg_key = 'websocket_msg_%s_%s'  # param: worker_id, message_id, return message data
     cache_timeout = 86400  # 1 day
     cache_fallback_timeout = 1  # seconds
 
-    def __init__(self, channel='socketio', cache='', cache_timeout=cache_timeout, debug=False):
+    def __init__(self, channel='socketio', cache=cache, cache_timeout=cache_timeout, debug=False):
         super().__init__(channel=channel, write_only=True, logger=logger)
         self._worker_id = None
         self.has_workers = False
         self.sids = []
         self.debug = debug
-        self.cache_store = cache
+        self.cache = cache
         self.cache_timeout = cache_timeout
         self._init_configuration()
 
@@ -82,9 +83,19 @@ class UWSGIManager(PubSubManager):
             # On reloading worker we empty the sids list on the current worker
             self._cache_save_sids()
 
+    @staticmethod
+    def cache_get_sids(cache=''):
+        # Get a list of current sids online, only for external use
+        store = []
+        for i in range(1, uwsgi.numproc + 1):
+            data = uwsgi.cache_get(UWSGIManager.cache_worker_key % i, cache)
+            if data is not None:
+                store.extend(pickle.loads(data))
+        return store
+
     def _cache_save_sids(self):
         # Save current sids list for current worker
-        uwsgi.cache_update(self.cache_worker_key % self.worker_id, pickle.dumps(self.sids), 0, self.cache_store)
+        uwsgi.cache_update(self.cache_worker_key % self.worker_id, pickle.dumps(self.sids), 0, self.cache)
 
     def _cache_sid_add(self, sid):
         logger.debug('Set SID from worker %s - %s' % (self.worker_id, sid))
@@ -109,7 +120,7 @@ class UWSGIManager(PubSubManager):
             return self._worker_id
         wid = 0
         for i in (i for i in range(1, uwsgi.numproc + 1) if i != self._worker_id):
-            store = pickle.loads(uwsgi.cache_get(self.cache_worker_key % i, self.cache_store))
+            store = pickle.loads(uwsgi.cache_get(self.cache_worker_key % i, self.cache))
             if sid in store:
                 wid = i
                 break
@@ -119,7 +130,7 @@ class UWSGIManager(PubSubManager):
         msg_key = None
         for msg_id in range(0, 10):
             msg_key = self.cache_msg_key % (worker_id, msg_id)
-            if uwsgi.cache_exists(msg_key, self.cache_store) is None:
+            if uwsgi.cache_exists(msg_key, self.cache) is None:
                 break
             msg_key = None
         if msg_key is None:
@@ -129,17 +140,17 @@ class UWSGIManager(PubSubManager):
         return uwsgi.cache_update(msg_key,
                                   pickle.dumps(data),
                                   self.cache_timeout if worker_id else self.cache_fallback_timeout,
-                                  self.cache_store)
+                                  self.cache)
 
     def _cache_get_msg(self, worker_id):
         for msg_id in range(0, 10):
             msg_key = self.cache_msg_key % (worker_id, msg_id)
-            msg = uwsgi.cache_get(msg_key, self.cache_store)
+            msg = uwsgi.cache_get(msg_key, self.cache)
             if msg is not None:
                 logger.debug('Get message from worker %s - %s' % (self.worker_id, msg_key))
                 if worker_id:
                     # delete message if worker_id is different from 0, else `short_cache_timeout` will do the job
-                    uwsgi.cache_del(msg_key, self.cache_store)
+                    uwsgi.cache_del(msg_key, self.cache)
                 yield msg
 
     def connect(self, sid, namespace):
