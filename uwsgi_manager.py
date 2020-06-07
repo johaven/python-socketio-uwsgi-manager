@@ -5,6 +5,7 @@ from socketio.pubsub_manager import PubSubManager
 
 try:
     import uwsgi
+    import uwsgidecorators
 except ImportError:
     uwsgi = None
 
@@ -31,31 +32,34 @@ class UWSGIManager(PubSubManager):
         means uWSGI will use the first cache instance initialized.
         If the cache is in the same instance as the werkzeug app,
         you only have to provide the name of the cache.
-    :param cache_timeout: The default timeout in seconds.
+    :param cache_timeout: timeout for events/messages for all workers.
+    :param cache_fallback_timeout: timeout for events/messages pushed to worker 0.
     :param debug: set logger to DEBUG level
 
     """
     name = 'uwsgi'
-    default_cache_timeout = 86400  # 1 day
-    short_cache_timeout = 2  # seconds
+    cache_worker_key = 'websocket_worker_%s'  # param: worker_id, return a list of sids
+    cache_msg_key = 'websocket_msg_%s_%s'  # param: worker_id, message_id, return message data
+    cache_timeout = 86400  # 1 day
+    cache_fallback_timeout = 1  # seconds
 
-    def __init__(self, channel='socketio', cache='', cache_timeout=default_cache_timeout, debug=False):
+    def __init__(self, channel='socketio', cache='', cache_timeout=cache_timeout, debug=False):
         super().__init__(channel=channel, write_only=True, logger=logger)
         self._worker_id = None
         self.has_workers = False
+        self.sids = []
         self.debug = debug
         self.cache_store = cache
         self.cache_timeout = cache_timeout
-        self.cache_sid_key = '%s_sid_%%s' % self.channel  # worker_id
-        self.cache_msg_key = '%s_msg_%%s_%%s' % self.channel  # worker_id, message_id
         self._init_configuration()
 
     def _init_configuration(self):
+        logger.setLevel(logging.DEBUG if self.debug else logger.WARNING)
         if uwsgi is None:
             raise RuntimeError('You are not running under uWSGI')
         if 'cache2' not in uwsgi.opt:
             raise RuntimeError('You must enable cache2 in uWSGI configuration: https://uwsgi-docs.readthedocs.io/en/latest/Caching.html')
-        logger.setLevel(logging.DEBUG if self.debug else logger.WARNING)
+        uwsgidecorators.postfork_chain.append(self._cache_worker_init)
         self._register_signals()
 
     @property
@@ -73,21 +77,43 @@ class UWSGIManager(PubSubManager):
             for i in range(1, uwsgi.numproc + 1):
                 uwsgi.register_signal(i, 'worker%s' % i, self._check_msg_in_cache)
 
+    def _cache_worker_init(self):
+        if self.worker_id != 0:
+            # On reloading worker we empty the sids list on the current worker
+            self._cache_save_sids()
+
+    def _cache_save_sids(self):
+        # Save current sids list for current worker
+        uwsgi.cache_update(self.cache_worker_key % self.worker_id, pickle.dumps(self.sids), 0, self.cache_store)
+
     def _cache_sid_add(self, sid):
         logger.debug('Set SID from worker %s - %s' % (self.worker_id, sid))
-        uwsgi.cache_update(self.cache_sid_key % sid, pickle.dumps(self.worker_id), self.cache_timeout, self.cache_store)
+        self.sids.append(sid)
+        self._cache_save_sids()
 
     def _cache_sid_del(self, sid):
         logger.debug('Delete SID from worker %s - %s' % (self.worker_id, sid))
-        uwsgi.cache_del(self.cache_sid_key % sid, self.cache_store)
+        try:
+            self.sids.remove(sid)
+        except ValueError:
+            logger.debug('SID %s was not found on worker %s' % (sid, self.worker_id))
+        else:
+            self._cache_save_sids()
 
     def _cache_worker_id(self, sid):
-        """ Get worker_id from sid else return the 0 id
+        """ Get worker_id from sid else return 0.
         :type sid: str
         :rtype: int
         """
-        wid = uwsgi.cache_get(self.cache_sid_key % sid, self.cache_store)
-        return 0 if wid is None else pickle.loads(wid)
+        if sid in self.sids:
+            return self._worker_id
+        wid = 0
+        for i in (i for i in range(1, uwsgi.numproc + 1) if i != self._worker_id):
+            store = pickle.loads(uwsgi.cache_get(self.cache_worker_key % i, self.cache_store))
+            if sid in store:
+                wid = i
+                break
+        return wid
 
     def _cache_add_msg(self, worker_id, data):
         msg_key = None
@@ -99,10 +125,10 @@ class UWSGIManager(PubSubManager):
         if msg_key is None:
             msg_key = self.cache_msg_key % (worker_id, 0)
             logger.warning('Cached queue for worker %s is full, overwrite data' % worker_id)
-        logger.debug('Store message from worker %s to %s - %s' % (self.worker_id, msg_key, data))
+        logger.debug('Store message from worker %s to %s' % (self.worker_id, msg_key))
         return uwsgi.cache_update(msg_key,
                                   pickle.dumps(data),
-                                  self.cache_timeout if worker_id else self.short_cache_timeout,
+                                  self.cache_timeout if worker_id else self.cache_fallback_timeout,
                                   self.cache_store)
 
     def _cache_get_msg(self, worker_id):
