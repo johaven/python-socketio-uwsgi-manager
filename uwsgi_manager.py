@@ -158,7 +158,7 @@ class UWSGIManager(PubSubManager):
         :type sid: str
         :type namespace: str
         """
-        if self.has_workers and namespace == '/':
+        if namespace == '/':
             logger.debug('Connected on worker %s - %s' % (self.worker_id, sid))
             self._cache_sid_add(sid)
         super().connect(sid, namespace)
@@ -168,7 +168,7 @@ class UWSGIManager(PubSubManager):
         :type sid: str
         :type namespace: str
         """
-        if self.has_workers and namespace == '/':
+        if namespace == '/':
             logger.debug('Disconnected from worker %s - %s' % (self.worker_id, sid))
             self._cache_sid_del(sid)
         super().disconnect(sid, namespace)
